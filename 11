@@ -1,0 +1,221 @@
+import logging
+from datetime import datetime, timedelta
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (ApplicationBuilder, CallbackContext, CommandHandler, CallbackQueryHandler, MessageHandler,
+                          filters)
+
+TOKEN_BOT = '**************************************'
+user_data = {}
+
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+
+async def add_income(update: Update, context: CallbackContext):
+    user = update.callback_query.from_user
+    profits_categories = ["Зарплата", "Продажі", "Подарунок", "Інше"]
+
+    buttons = [InlineKeyboardButton(category, callback_data=f"add_income_{category}") for category in profits_categories]
+    keyboard = [[button] for button in buttons]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text("Оберіть категорію доходу:", reply_markup=reply_markup)
+    context.user_data['category'] = 'income'
+
+
+async def add_expense(update: Update, context: CallbackContext):
+    user = update.callback_query.from_user
+    cost_categories = ["Їжа", "Транспорт", "Оренда", "Розваги", "Інше"]
+
+    buttons = [InlineKeyboardButton(category, callback_data=f"add_expense_{category}") for category in
+               cost_categories]
+    keyboard = [[button] for button in buttons]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text("Оберіть категорію витрат:", reply_markup=reply_markup)
+    context.user_data['category'] = 'expense'
+
+
+async def enter_amount(update: Update, context: CallbackContext):
+    print("Entering enter_amount function")
+    user = update.callback_query.from_user
+    category_data = context.match.group()
+
+    print(f"Category Data: {category_data}")
+
+    if category_data.startswith('add_income_'):
+        category = category_data.split('_')[1]
+        current_datetime = datetime.now().strftime('%Y-%m-%d')
+
+        user_id = user.id
+        if user_id not in user_data:
+            user_data[user_id] = {'Дохід': {}, 'Витрати': {}}
+
+        context.user_data['category'] = category
+        context.user_data['datetime'] = current_datetime
+
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("Введіть суму:")
+    elif category_data.startswith('add_expense_'):
+        print("Entering add_expense block")
+        category = category_data.split('_')[1]
+        current_datetime = datetime.now().strftime('%Y-%m-%d')
+
+        user_id = user.id
+        if user_id not in user_data:
+            user_data[user_id] = {'Дохід': {}, 'Витрати': {}}
+
+        context.user_data['category'] = category
+        context.user_data['datetime'] = current_datetime
+
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("Введіть суму витрати:")
+    else:
+        print("Не входить в блок 'if' всередині 'if context.match'")
+        await update.callback_query.answer()
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Невірний формат категорії")
+
+
+async def handle_amount_entry(update: Update, context: CallbackContext):
+    user = update.effective_user
+    amount_text = update.message.text
+
+    try:
+        amount = float(amount_text)
+
+        user_id = user.id
+        category = context.user_data.get('category')
+        current_datetime = context.user_data.get('datetime')
+
+        if category and current_datetime:
+            if category == 'income':
+                income_entry = user_data[user_id]['Дохід'].setdefault(current_datetime, {})
+                income_entry[category] = income_entry.get(category, 0) + amount
+                await update.message.reply_text(
+                    f"Дохід {amount:.2f} додано в категорію {category} {current_datetime}!"
+                )
+            elif category == 'expense':
+                expense_entry = user_data[user_id]['Витрати'].setdefault(current_datetime, {})
+                expense_entry[category] = expense_entry.get(category, 0) + amount
+                await update.message.reply_text(
+                    f"Витрата {amount:.2f} додана в категорію {category} {current_datetime}!"
+                )
+        else:
+            print("Невірна категорія або дата в context.user_data")
+    except ValueError as e:
+        print(f"Помилка конвертації суми в число з плаваючою точкою: {e}")
+        await update.message.reply_text("Невірний формат суми")
+
+    context.user_data.pop('category', None)
+    context.user_data.pop('datetime', None)
+
+
+async def view_day_history(update: Update, context: CallbackContext):
+    await view_history(update, context, period='day')
+
+
+async def view_week_history(update: Update, context: CallbackContext):
+    await view_history(update, context, period='week')
+
+
+async def view_month_history(update: Update, context: CallbackContext):
+    await view_history(update, context, period='month')
+
+
+async def view_history(update: Update, context: CallbackContext, period=None):
+    user = update.callback_query.from_user
+    query = update.callback_query
+    user_id = user.id
+
+    today = datetime.now().date()
+
+    if period is None:
+        keyboard = [
+            [InlineKeyboardButton("День", callback_data="day")],
+            [InlineKeyboardButton("Тиждень", callback_data="week")],
+            [InlineKeyboardButton("Місяць", callback_data="month")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.message.reply_text(text="Виберіть період для перегляду історії.", reply_markup=reply_markup)
+        return
+
+    if period == 'day':
+        start_date = today - timedelta(days=1)
+    elif period == 'week':
+        start_date = today - timedelta(weeks=1)
+    elif period == 'month':
+        start_date = today.replace(day=1) - timedelta(days=1)
+    else:
+        print(f"Invalid period: {period}")
+        await query.message.reply_text("Невірно вказаний період. Використовуйте 'day', 'week' або 'month'.")
+        return
+
+    user_records = user_data.get(user_id, {'Дохід': {}, 'Витрати': {}})
+
+    filtered_income_records = {
+        date: sum(categories.values()) for date, categories in user_records['Дохід'].items()
+        if datetime.strptime(date, '%Y-%m-%d').date() >= start_date
+    }
+
+    total_income = sum(filtered_income_records.values())
+
+    filtered_expense_records = {
+        date: sum(categories.values()) for date, categories in user_records['Витрати'].items()
+        if datetime.strptime(date, '%Y-%m-%d').date() >= start_date
+    }
+
+    total_expense = sum(filtered_expense_records.values())
+
+    balance = total_income - total_expense
+
+    message = f"Баланс за період {balance}:\n"
+    message += f"Доходи: {total_income} грн\n"
+    message += f"Витрати: {total_expense} грн\n"
+
+    await query.message.reply_text(text=message, reply_markup=None)
+
+
+async def start(update: Update, context: CallbackContext) -> None:
+    logging.info("Command start was triggered")
+    await update.message.reply_text("Welcome to my Cash Counter Bot!")
+
+    keyboard = [
+        [
+            InlineKeyboardButton("Додати доход", callback_data="add_income"),
+            InlineKeyboardButton("Додати витрату", callback_data="add_expense")
+        ],
+        [InlineKeyboardButton("Переглянути історію", callback_data="view_history")]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Будь ласка виберіть дію:", reply_markup=reply_markup)
+
+
+def run():
+    app = ApplicationBuilder().token(TOKEN_BOT).build()
+    logging.info("Application build successfully!")
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))
+    app.add_handler(CallbackQueryHandler(add_income, pattern='^add_income$'))
+    app.add_handler(CallbackQueryHandler(add_expense, pattern='^add_expense$'))
+    app.add_handler(CallbackQueryHandler(enter_amount, pattern=r'^add_income_'))
+    app.add_handler(CallbackQueryHandler(enter_amount, pattern=r'^add_expense_'))
+    app.add_handler(CallbackQueryHandler(view_history, pattern='^view_history.*'))
+    app.add_handler(CallbackQueryHandler(view_day_history, pattern='^day$'))
+    app.add_handler(CallbackQueryHandler(view_week_history, pattern='^week$'))
+    app.add_handler(CallbackQueryHandler(view_month_history, pattern='^month$'))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_amount_entry))
+
+    app.run_polling()
+
+
+if __name__ == '__main__':
+    run()
