@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CallbackContext, CommandHandler, CallbackQueryHandler, MessageHandler,
                           filters)
 
-TOKEN_BOT = '6244933023:AAFvvyA9kW1lHp6iE4iCn7KQRzmU8k3lCn4'
+TOKEN_BOT = '******************'
 user_data = {}
 
 
